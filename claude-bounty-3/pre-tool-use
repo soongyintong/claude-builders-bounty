@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""
+Claude Code pre-tool-use hook — blocks destructive Bash commands before execution.
+Parses the JSON hook input on stdin, checks the command, and returns allow/deny.
+"""
+
+import json
+import os
+import re
+import sys
+from datetime import datetime, timezone
+
+
+LOG_PATH = os.path.expanduser("~/.claude/hooks/blocked.log")
+CWD = os.getcwd()
+
+# ── patterns that get you in trouble ──
+DANGER_PATTERNS = [
+    # filesystem nukes
+    (re.compile(r"\brm\s+.*-r.*f\b", re.IGNORECASE), "rm -rf (recursive force remove)"),
+    (re.compile(r"\brm\s+.*-fr\b", re.IGNORECASE), "rm -fr (recursive force remove)"),
+
+    # git force push — easy way to lose history
+    (re.compile(r"\bgit\s+push\s+.*(--force|-f)\b", re.IGNORECASE), "git push --force"),
+    (re.compile(r"\bgit\s+push\s+.*\+[a-zA-Z]", re.IGNORECASE), "git push with forced refspec"),
+
+    # database destruction
+    (re.compile(r"\bDROP\s+TABLE\b", re.IGNORECASE), "DROP TABLE"),
+    (re.compile(r"\bDROP\s+DATABASE\b", re.IGNORECASE), "DROP DATABASE"),
+    (re.compile(r"\bTRUNCATE\b", re.IGNORECASE), "TRUNCATE"),
+
+    # DELETE FROM without WHERE — the "oops I deleted production" special
+    (re.compile(r"\bDELETE\s+FROM\s+\w+(?!.*\bWHERE\b)", re.IGNORECASE), "DELETE FROM without WHERE"),
+]
+
+
+def log_block(command: str, reason: str) -> None:
+    os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    entry = {
+        "timestamp": timestamp,
+        "command": command,
+        "project_path": CWD,
+        "reason": reason,
+    }
+    with open(LOG_PATH, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def denial(reason: str) -> dict:
+    """Claude Code expects this shape for a deny decision."""
+    return {
+        "hookSpecificOutput": {
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    }
+
+
+def main():
+    try:
+        payload = json.load(sys.stdin)
+    except (json.JSONDecodeError, IOError):
+        # can't parse input → fail open, don't block legit work
+        return
+
+    tool_name = payload.get("tool_name", "")
+    if tool_name.lower() != "bash":
+        # only interested in bash commands
+        print(json.dumps({"hookSpecificOutput": {"permissionDecision": "allow"}}))
+        return
+
+    command = payload.get("tool_input", {}).get("command", "")
+    if not command:
+        print(json.dumps({"hookSpecificOutput": {"permissionDecision": "allow"}}))
+        return
+
+    for pattern, label in DANGER_PATTERNS:
+        if pattern.search(command):
+            reason = f"Blocked {label}: {command[:120]}"
+            log_block(command, label)
+            print(json.dumps(denial(reason)))
+            return
+
+    # clean command → let it through
+    print(json.dumps({"hookSpecificOutput": {"permissionDecision": "allow"}}))
+
+
+if __name__ == "__main__":
+    main()
