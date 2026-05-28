@@ -1,0 +1,111 @@
+name: claude-review
+on:
+  pull_request_target:
+    types: [opened, synchronize, ready_for_review]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Review PR
+        id: review
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npm install -g claude-review 2>/dev/null || true
+          PR_URL="${{ github.event.pull_request.html_url }}"
+          # Try claude-review if available, otherwise use the inline script
+          REVIEW=$(cat <<'SCRIPT'
+          #!/usr/bin/env node
+          const https = require('https');
+          const url = process.env.PR_URL;
+          const [owner, repo, prNum] = url.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/).slice(1);
+
+          const headers = process.env.GH_TOKEN
+            ? { 'Authorization': 'token ' + process.env.GH_TOKEN, 'User-Agent': 'claude-review' }
+            : { 'User-Agent': 'claude-review' };
+
+          const getJSON = (path) => new Promise((resolve, reject) => {
+            https.get('https://api.github.com' + path, { headers }, res => {
+              let data = '';
+              res.on('data', chunk => data += chunk);
+              res.on('end', () => resolve(JSON.parse(data)));
+            }).on('error', reject);
+          });
+
+          async function main() {
+            const pr = await getJSON('/repos/' + owner + '/' + repo + '/pulls/' + prNum);
+            const files = await getJSON('/repos/' + owner + '/' + repo + '/pulls/' + prNum + '/files');
+
+            const analysis = { warnings: [], suggestions: [], positives: [] };
+            const total = files.length;
+            const add = files.reduce((s, f) => s + f.additions, 0);
+            const del = files.reduce((s, f) => s + f.deletions, 0);
+
+            if (add + del > 1500) analysis.warnings.push('Large PR: ' + add + '+' + del + '- across ' + total + ' files.');
+
+            for (const f of files) {
+              if (f.additions + f.deletions > 200) analysis.warnings.push('Large file: ' + f.filename);
+              if ((f.patch || '').match(/console\.(log|warn|error)\(/g)?.length > 2) {
+                analysis.suggestions.push('Remove debug console.log in ' + f.filename);
+              }
+            }
+
+            // Output markdown
+            const review = [
+              '## 🔍 PR Review',
+              '',
+              '**PR**: [' + pr.title + '](' + url + ')',
+              '**Author**: ' + pr.user.login,
+              '**Branch**: ' + pr.base.ref + ' ← ' + pr.head.ref,
+              '**Stats**: ' + total + ' files | ' + add + ' ✚ | ' + del + ' ✖',
+              '',
+              '### 📋 Summary',
+              '',
+              'This PR (' + pr.base.ref + ' ← ' + pr.head.ref + ') changes ' + total + ' file(s).',
+              '',
+              '### ⚠️ Risks',
+              '',
+              (analysis.warnings.length ? analysis.warnings.map(w => '- ' + w).join('\n') : '- None identified'),
+              '',
+              '### 💡 Suggestions',
+              '',
+              (analysis.suggestions.length ? analysis.suggestions.map(s => '- ' + s).join('\n') : '- None'),
+              '',
+              '### ✅ Positives',
+              '',
+              (analysis.positives.length ? analysis.positives.map(p => '- ' + p).join('\n') : '- Change scope is reasonable.'),
+              '',
+              '---',
+              '🤖 Review by claude-review'
+            ].join('\n');
+
+            // Write to file for posting
+            require('fs').writeFileSync(process.env.GITHUB_ENV, 'REVIEW_BODY<<EOF\n' + review + '\nEOF', 'utf-8');
+          }
+
+          main().catch(e => process.exit(0)); // silent fail
+          SCRIPT
+          )
+          node -e "$REVIEW"
+
+      - name: Post Review
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = process.env.REVIEW_BODY;
+            if (body) {
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+            }
