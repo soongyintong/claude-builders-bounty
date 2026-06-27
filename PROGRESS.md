@@ -12,18 +12,20 @@
 - 已补充安装脚本、README 和本地验证命令
 - 已补充 unittest 覆盖阻止/放行/日志行为
 - 已完成 Ralph 循环，四条命令全部通过：`make type-check` / `make test` / `make lint` / `make build`
+- 已提交并推送分支：`soongyintong:feature/issue-3-block-destructive-hook`
+- 已创建 PR：https://github.com/claude-builders-bounty/claude-builders-bounty/pull/3079
 
 ---
 
 ## 🔄 进行中
 
-- 推送分支并创建 PR
+- 等待维护者 review / Opire 检查
 
 ---
 
 ## 📋 待办
 
-- PR 创建后回填记录
+- 根据 review 反馈调整
 
 ---
 
