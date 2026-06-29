@@ -1,0 +1,56 @@
+# Claude Review — GitHub Action
+#
+# 在 PR 上自动触发 review，把结果作为 PR comment 贴上去。
+# 需要设置以下 Secrets：
+#   ANTHROPIC_API_KEY  — Claude 的 API key
+#   GITHUB_TOKEN       — 自动可用，不需额外设置
+
+name: Claude Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run Claude Review
+        id: review
+        uses: docker://ghcr.io/anthropics/claude-code:latest
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        with:
+          args: >
+            claude --print
+            "Review this PR at \$PR_URL.
+            Fetch the diff with \`gh pr diff \${{ github.event.pull_request.number }}\`,
+            analyze it, and output a structured Markdown review with:
+            Summary, Identified Risks, Improvement Suggestions, Confidence Score.
+            Then post the review as a comment on this PR using
+            \`gh pr comment \${{ github.event.pull_request.number }} --body \"@<review-content>\"\`"
+
+      - name: Post Review Comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} \
+            --repo ${{ github.repository }} \
+            --body "🤖 **Claude Review** completed automatically."
