@@ -11,21 +11,24 @@
 - 已实现 `hooks/pre-tool-use/block-dangerous-bash.js`
 - 已补充安装脚本、README 使用说明和 node:test 覆盖
 - 四条完成命令已全绿：`npm run type-check` / `npm test` / `npm run lint` / `npm run build`
+- 已提交本地 commit：`a1d4d82 feat: add destructive command pre-tool hook`
+- 已按 issue 要求评论 `/opire try`：https://github.com/claude-builders-bounty/claude-builders-bounty/issues/3#issuecomment-4921844218
 
 ---
 
 ## 🔄 进行中
 
-- 准备提交并创建 PR
+- 无
 
 ---
 
 ## 📋 待办
 
-- 提交、推送分支并创建 PR
+- 需要后续用可写 fork 推送分支并创建 PR
 
 ---
 
 ## ⚠️ 已知问题
 
-- 无
+- `git push -u origin agent/oen/issue-3` 返回 403，上游仓库无写权限
+- `gh repo fork claude-builders-bounty/claude-builders-bounty --remote --remote-name fork` 返回非零；按本轮铁律停止继续 GitHub 操作
